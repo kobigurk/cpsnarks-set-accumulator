@@ -1,4 +1,4 @@
 [submodule "docs"]
 	path = docs
-	url = ssh://git@github.com/cambrian/accumulator.git
+	url = https://github.com/cambrian/accumulator.git
 	branch = gh-pages
