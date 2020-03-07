@@ -387,7 +387,8 @@ impl<G: UnknownOrderGroup, T: Clone + Hash> Witness<G, T> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::group::{ClassGroup, Rsa2048};
+//  use crate::group::{ClassGroup, Rsa2048};
+  use crate::group::{Rsa2048};
 
   fn new_acc<G: UnknownOrderGroup, T: Hash + Eq>(data: &[T]) -> Accumulator<G, T> {
     Accumulator::<G, T>::empty().add(data)
@@ -403,6 +404,7 @@ mod tests {
         $test_func::<Rsa2048>();
       }
 
+/*
       #[test]
       $(
         #[$attr]
@@ -410,6 +412,7 @@ mod tests {
       fn $func_name_class() {
         $test_func::<ClassGroup>();
       }
+*/
     };
   }
 

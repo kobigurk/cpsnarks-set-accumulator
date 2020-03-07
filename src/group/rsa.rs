@@ -1,5 +1,5 @@
 //! RSA (2048) group using GMP integers in the `rug` crate.
-use super::{ElemFrom, Group, UnknownOrderGroup};
+use super::{ElemFrom, ElemTo, Group, UnknownOrderGroup};
 use crate::util::{int, TypeRep};
 use rug::Integer;
 use std::str::FromStr;
@@ -74,9 +74,22 @@ where
   }
 }
 
+impl<T> ElemTo<T> for Rsa2048
+where
+  T: From<Integer>
+{
+  fn elem_to(val: &Rsa2048Elem) -> T {
+    val.0.clone().into()
+  }
+}
+
 impl UnknownOrderGroup for Rsa2048 {
   fn unknown_order_elem_(_: &Integer) -> Rsa2048Elem {
     Self::elem(2)
+  }
+
+  fn order_upper_bound_(_: &Integer) -> Integer {
+      RSA2048_MODULUS.clone()
   }
 }
 

@@ -10,10 +10,10 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::Sized;
 
-mod class;
-pub use class::{ClassElem, ClassGroup};
-mod ristretto;
-pub use ristretto::{Ristretto, RistrettoElem};
+//mod class;
+//pub use class::{ClassElem, ClassGroup};
+//mod ristretto;
+//pub use ristretto::{Ristretto, RistrettoElem};
 mod rsa;
 pub use rsa::{Rsa2048, Rsa2048Elem};
 
@@ -110,14 +110,28 @@ pub trait UnknownOrderGroup: Group {
     Self::unknown_order_elem_(Self::rep())
   }
 
+  /// Return an upper bound for the group order.
+  fn order_upper_bound() -> Integer {
+    Self::order_upper_bound_(Self::rep())
+  }
+
   /// A group-specific wrapper for `unknown_order_elem`.
   fn unknown_order_elem_(rep: &Self::Rep) -> Self::Elem;
+
+  /// A group-specific wrapper for `order_upper_bound`.
+  fn order_upper_bound_(rep: &Self::Rep) -> Integer;
 }
 
 /// Like `From<T>`, but implemented on the `Group` instead of the element type.
 pub trait ElemFrom<T>: Group {
   /// Returns a group element from an initial value.
   fn elem(val: T) -> Self::Elem;
+}
+
+/// Like `Into<T>`, but implemented on the `Group` instead of the element type.
+pub trait ElemTo<T>: Group {
+  /// Returns a group element from an initial value.
+  fn elem_to(val: &Self::Elem) -> T;
 }
 
 /// Computes the product of `alpha_i ^ (p(x) / x_i)`, where `i` is an index into the `alphas` and
