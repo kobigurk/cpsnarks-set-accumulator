@@ -1,5 +1,5 @@
 //! Vector commitment library, built on a generic group interface. **Very much a WIP.**
-use super::accumulator::{Accumulator, MembershipProof, NonmembershipProof, Witness};
+use super::accumulator::{Accumulator, AccumulatorParameters, MembershipProof, NonmembershipProof, Witness};
 use crate::group::UnknownOrderGroup;
 use rug::Integer;
 use std::collections::HashSet;
@@ -18,12 +18,12 @@ pub enum VCError {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// A vector commitment, wrapping an underlying accumulator. The accumulator contains indices of an
 /// abstract vector where the corresponding bit is True.
-pub struct VectorCommitment<G: UnknownOrderGroup>(Accumulator<G, Integer>);
+pub struct VectorCommitment<G: UnknownOrderGroup, P: AccumulatorParameters>(Accumulator<G, Integer, P>);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// A vector commitment proof.
-pub struct VectorProof<G: UnknownOrderGroup> {
-  membership_proof: MembershipProof<G, Integer>,
+pub struct VectorProof<G: UnknownOrderGroup, P: AccumulatorParameters> {
+  membership_proof: MembershipProof<G, Integer, P>,
   nonmembership_proof: NonmembershipProof<G, Integer>,
 }
 
@@ -44,10 +44,10 @@ fn group_elems_by_bit(bits: &[(bool, Integer)]) -> Result<(Vec<Integer>, Vec<Int
   Ok((elems_with_zero, elems_with_one))
 }
 
-impl<G: UnknownOrderGroup> VectorCommitment<G> {
+impl<G: UnknownOrderGroup, P: AccumulatorParameters> VectorCommitment<G, P> {
   /// Initializes a new vector commitment (VC).
   pub fn empty() -> Self {
-    Self(Accumulator::<G, Integer>::empty())
+    Self(Accumulator::<G, Integer, P>::empty())
   }
 
   /// Updates a VC with a list of values and indices.
@@ -62,7 +62,7 @@ impl<G: UnknownOrderGroup> VectorCommitment<G> {
     vc: Self,
     vc_acc_set: &[Integer],
     bits: &[(bool, Integer)],
-  ) -> Result<(Self, VectorProof<G>), VCError> {
+  ) -> Result<(Self, VectorProof<G, P>), VCError> {
     let (elems_with_zero, elems_with_one) = group_elems_by_bit(&bits)?;
     let (new_acc, membership_proof) = vc.0.add_with_proof(&elems_with_one);
     let nonmembership_proof = new_acc
@@ -87,8 +87,8 @@ impl<G: UnknownOrderGroup> VectorCommitment<G> {
     vc: &Self,
     vc_acc_set: &[Integer],
     zero_bits: &[Integer],
-    one_bit_witnesses: &[(Integer, Witness<G, Integer>)],
-  ) -> Result<VectorProof<G>, VCError> {
+    one_bit_witnesses: &[(Integer, Witness<G, Integer, P>)],
+  ) -> Result<VectorProof<G, P>, VCError> {
     let membership_proof = vc
       .0
       .prove_membership(one_bit_witnesses)
@@ -115,7 +115,7 @@ impl<G: UnknownOrderGroup> VectorCommitment<G> {
     VectorProof {
       membership_proof,
       nonmembership_proof,
-    }: &VectorProof<G>,
+    }: &VectorProof<G, P>,
   ) -> bool {
     let group_result = group_elems_by_bit(&bits);
     if group_result.is_err() {

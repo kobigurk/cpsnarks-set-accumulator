@@ -26,37 +26,69 @@ pub enum AccError {
   InputsNotCoprime,
 }
 
+/// Parameters for the accumulator
+pub trait AccumulatorParameters {
+  /// checks if the accumulator should hash to prime or use elements as-is
+  fn should_hash_to_prime() -> bool;
+}
+
+#[derive(PartialEq)]
+/// an accumulator that does hash to prime
+pub struct AccumulatorWithHashToPrime {}
+impl AccumulatorParameters for AccumulatorWithHashToPrime {
+  fn should_hash_to_prime() -> bool { true }
+}
+
+#[derive(PartialEq)]
+/// an accumulator that doesn't do hash to prime, because it assumes its elements are prime
+pub struct AccumulatorWithoutHashToPrime {}
+impl AccumulatorParameters for AccumulatorWithoutHashToPrime {
+  fn should_hash_to_prime() -> bool { false }
+}
+
 // See https://doc.rust-lang.org/std/marker/struct.PhantomData.html#ownership-and-the-drop-check
 // for recommendations regarding phantom types. Note that we disregard the suggestion to use a
 // const reference in the phantom type parameter, which causes issues for the `Send` trait.
 #[derive(Debug, Eq, Hash, PartialEq)]
 /// A cryptographic accumulator. Wraps a single unknown-order group element and phantom data
 /// representing the type `T` being hashed-to-prime and accumulated.
-pub struct Accumulator<G: UnknownOrderGroup, T> {
+pub struct Accumulator<G: UnknownOrderGroup, T: Into<Integer>, P: AccumulatorParameters> {
   phantom: PhantomData<T>,
-  value: G::Elem,
+  phantom_params: PhantomData<P>,
+
+  /// the underlying value of the accumulator
+  pub value: G::Elem,
 }
 
 // Manual clone impl required because Rust's type inference is not good. See
 // https://github.com/rust-lang/rust/issues/26925.
-impl<G: UnknownOrderGroup, T: Hash> Clone for Accumulator<G, T> {
+impl<G: UnknownOrderGroup, T: Hash + Into<Integer>, P: AccumulatorParameters> Clone for Accumulator<G, T, P> {
   fn clone(&self) -> Self {
     Self {
       phantom: PhantomData,
+      phantom_params: PhantomData,
       value: self.value.clone(),
     }
   }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 /// A witness to one or more values in an accumulator, represented as an accumulator.
-pub struct Witness<G: UnknownOrderGroup, T: Hash>(pub Accumulator<G, T>);
+pub struct Witness<G: UnknownOrderGroup, T: Hash + Into<Integer>, P: AccumulatorParameters>(pub Accumulator<G, T, P>);
+
+// Manual clone impl required because Rust's type inference is not good. See
+// https://github.com/rust-lang/rust/issues/26925.
+impl<G: UnknownOrderGroup, T: Hash + Into<Integer>, P: AccumulatorParameters> Clone for Witness<G, T, P> {
+  fn clone(&self) -> Self {
+    Witness(self.0.clone())
+  }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// A succinct proof of membership (some element is in some accumulator).
-pub struct MembershipProof<G: UnknownOrderGroup, T: Hash> {
+pub struct MembershipProof<G: UnknownOrderGroup, T: Hash + Into<Integer> + Clone, P: AccumulatorParameters> {
   /// The witness for the element in question.
-  pub witness: Witness<G, T>,
+  pub witness: Witness<G, T, P>,
   proof: Poe<G>,
 }
 
@@ -71,23 +103,41 @@ pub struct NonmembershipProof<G: UnknownOrderGroup, T> {
   poe_proof: Poe<G>,
 }
 
-impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
+impl<G: UnknownOrderGroup, T: Eq + Hash + Into<Integer> + Clone, P: AccumulatorParameters> Accumulator<G, T, P> {
   /// Returns a new, empty accumulator.
   pub fn empty() -> Self {
     Self {
       phantom: PhantomData,
+      phantom_params: PhantomData,
       value: G::unknown_order_elem(),
+    }
+  }
+
+  fn hash_to_prime_if_needed(t: &T) -> Integer {
+      if P::should_hash_to_prime() {
+        hash_to_prime(t)
+      } else {
+        (*t).clone().into()
+      }
+  }
+
+  fn prime_hash_product_if_needed(ts: &[T]) -> Integer {
+    if P::should_hash_to_prime() {
+      prime_hash_product(ts)
+    } else {
+      ts.into_iter().map(|x| x.clone().into()).product()
     }
   }
 
   /// Internal add method that also returns the prime hash product of added elements, enabling an
   /// efficient `add_with_proof`.
   fn add_(&self, elems: &[T]) -> (Self, Integer) {
-    let x = prime_hash_product(elems);
+    let x = Self::prime_hash_product_if_needed(elems);
     let acc_elem = G::exp(&self.value, &x);
     (
       Self {
         phantom: PhantomData,
+        phantom_params: PhantomData,
         value: acc_elem,
       },
       x,
@@ -106,7 +156,7 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   }
 
   /// A specialized version of `add` that also returns a batch membership proof for added elements.
-  pub fn add_with_proof(self, elems: &[T]) -> (Self, MembershipProof<G, T>) {
+  pub fn add_with_proof(self, elems: &[T]) -> (Self, MembershipProof<G, T, P>) {
     let (acc, x) = self.add_(elems);
     let proof = Poe::<G>::prove(&self.value, &x, &acc.value);
     (
@@ -123,10 +173,10 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   ///
   /// Uses a divide-and-conquer approach to running the ShamirTrick, which keeps the average input
   /// smaller: For `[a, b, c, d]` do `S(S(a, b), S(c, d))` instead of `S(S(S(a, b), c), d)`.
-  fn delete_(self, elem_witnesses: &[(T, Witness<G, T>)]) -> Result<(Self, Integer), AccError> {
+  fn delete_(self, elem_witnesses: &[(T, Witness<G, T, P>)]) -> Result<(Self, Integer), AccError> {
     let prime_witnesses = elem_witnesses
       .iter()
-      .map(|(elem, witness)| (hash_to_prime(elem), witness.0.value.clone()))
+      .map(|(elem, witness)| (Self::hash_to_prime_if_needed(elem), witness.0.value.clone()))
       .collect::<Vec<_>>();
 
     for (p, witness_elem) in &prime_witnesses {
@@ -144,6 +194,7 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
     Ok((
       Self {
         phantom: PhantomData,
+        phantom_params: PhantomData,
         value: acc_elem.clone(),
       },
       prime_product,
@@ -157,7 +208,7 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   /// * `elem_witnesses` - Tuples consisting of (element to delete, element's witness).
   ///
   /// Uses a move instead of a `&self` reference to prevent accidental use of the old accumulator.
-  pub fn delete(self, elem_witnesses: &[(T, Witness<G, T>)]) -> Result<Self, AccError> {
+  pub fn delete(self, elem_witnesses: &[(T, Witness<G, T, P>)]) -> Result<Self, AccError> {
     Ok(self.delete_(elem_witnesses)?.0)
   }
 
@@ -165,8 +216,8 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   /// elements.
   pub fn delete_with_proof(
     self,
-    elem_witnesses: &[(T, Witness<G, T>)],
-  ) -> Result<(Self, MembershipProof<G, T>), AccError> {
+    elem_witnesses: &[(T, Witness<G, T, P>)],
+  ) -> Result<(Self, MembershipProof<G, T, P>), AccError> {
     let (acc, prime_product) = self.clone().delete_(elem_witnesses)?;
     let proof = Poe::<G>::prove(&acc.value, &prime_product, &self.value);
     Ok((
@@ -186,12 +237,12 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   /// * `elem_witnesses` - Tuples consisting of (element to prove, element's witness).
   pub fn prove_membership(
     &self,
-    elem_witnesses: &[(T, Witness<G, T>)],
-  ) -> Result<MembershipProof<G, T>, AccError> {
+    elem_witnesses: &[(T, Witness<G, T, P>)],
+  ) -> Result<MembershipProof<G, T, P>, AccError> {
     let witness_accum = self.clone().delete(elem_witnesses)?;
     let prod = elem_witnesses
       .iter()
-      .map(|(t, _)| hash_to_prime(t))
+      .map(|(t, _)| Self::hash_to_prime_if_needed(t))
       .product();
     let proof = Poe::<G>::prove(&witness_accum.value, &prod, &self.value);
     Ok(MembershipProof {
@@ -205,9 +256,9 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   pub fn verify_membership(
     &self,
     t: &T,
-    MembershipProof { witness, proof }: &MembershipProof<G, T>,
+    MembershipProof { witness, proof }: &MembershipProof<G, T, P>,
   ) -> bool {
-    let exp = hash_to_prime(t);
+    let exp = Self::hash_to_prime_if_needed(t);
     Poe::verify(&witness.0.value, &exp, &self.value, proof)
   }
 
@@ -215,9 +266,9 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   pub fn verify_membership_batch(
     &self,
     elems: &[T],
-    MembershipProof { witness, proof }: &MembershipProof<G, T>,
+    MembershipProof { witness, proof }: &MembershipProof<G, T, P>,
   ) -> bool {
-    let exp = prime_hash_product(elems);
+    let exp = Self::prime_hash_product_if_needed(elems);
     Poe::verify(&witness.0.value, &exp, &self.value, proof)
   }
 
@@ -228,13 +279,13 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
   /// See Section 4.2 of LLX for implementation details.
   pub fn update_membership_witness(
     &self,
-    witness: Witness<G, T>,
+    witness: Witness<G, T, P>,
     tracked_elems: &[T],
     untracked_additions: &[T],
     untracked_deletions: &[T],
-  ) -> Result<Witness<G, T>, AccError> {
-    let x = prime_hash_product(tracked_elems);
-    let x_hat = prime_hash_product(untracked_deletions);
+  ) -> Result<Witness<G, T, P>, AccError> {
+    let x = Self::prime_hash_product_if_needed(tracked_elems);
+    let x_hat = Self::prime_hash_product_if_needed(untracked_deletions);
 
     for elem in tracked_elems {
       if untracked_additions.contains(elem) || untracked_deletions.contains(elem) {
@@ -250,6 +301,7 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
     let acc_new_to_a = G::exp(&self.value, &a);
     Ok(Witness(Self {
       phantom: PhantomData,
+      phantom_params: PhantomData,
       value: G::op(&w_to_b, &acc_new_to_a),
     }))
   }
@@ -266,8 +318,8 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
     acc_set: &[T],
     elems: &[T],
   ) -> Result<NonmembershipProof<G, T>, AccError> {
-    let x: Integer = elems.iter().map(hash_to_prime).product();
-    let s = acc_set.iter().map(hash_to_prime).product();
+    let x: Integer = elems.iter().map(Self::hash_to_prime_if_needed).product();
+    let s = acc_set.iter().map(Self::hash_to_prime_if_needed).product();
     let (gcd, a, b) = <(Integer, Integer, Integer)>::from(x.gcd_cofactors_ref(&s));
 
     if gcd != int(1) {
@@ -305,18 +357,34 @@ impl<G: UnknownOrderGroup, T: Eq + Hash> Accumulator<G, T> {
       ..
     }: &NonmembershipProof<G, T>,
   ) -> bool {
-    let x = elems.iter().map(hash_to_prime).product();
+    let x = elems.iter().map(Self::hash_to_prime_if_needed).product();
     Poke2::verify(&self.value, v, poke2_proof) && Poe::verify(d, &x, gv_inv, poe_proof)
   }
 }
 
-impl<G: UnknownOrderGroup, T: Eq + Hash> From<&[T]> for Accumulator<G, T> {
+impl<G: UnknownOrderGroup, T: Eq + Hash + Into<Integer> + Clone, P: AccumulatorParameters> From<&[T]> for Accumulator<G, T, P> {
   fn from(ts: &[T]) -> Self {
     Self::empty().add(ts)
   }
 }
 
-impl<G: UnknownOrderGroup, T: Clone + Hash> Witness<G, T> {
+impl<G: UnknownOrderGroup, T: Clone + Hash + Into<Integer>, P: AccumulatorParameters> Witness<G, T, P> {
+  fn hash_to_prime_if_needed(t: &T) -> Integer {
+    if P::should_hash_to_prime() {
+      hash_to_prime(t)
+    } else {
+      (*t).clone().into()
+    }
+  }
+
+  fn prime_hash_product_if_needed(ts: &[T]) -> Integer {
+    if P::should_hash_to_prime() {
+      prime_hash_product(ts)
+    } else {
+      ts.into_iter().map(|x| x.clone().into()).product()
+    }
+  }
+
   /// Given a witness for `witness_set`, returns a witness for `witness_subset`.
   ///
   /// The `witness_subset` must be a subset of the `witness_set`.
@@ -334,8 +402,8 @@ impl<G: UnknownOrderGroup, T: Clone + Hash> Witness<G, T> {
       }
     }
 
-    let numerator = prime_hash_product(witness_set);
-    let denominator = prime_hash_product(witness_subset);
+    let numerator = Self::prime_hash_product_if_needed(witness_set);
+    let denominator = Self::prime_hash_product_if_needed(witness_subset);
     let (quotient, remainder) = numerator.div_rem(denominator);
 
     if remainder != int(0) {
@@ -344,6 +412,7 @@ impl<G: UnknownOrderGroup, T: Clone + Hash> Witness<G, T> {
 
     Ok(Self(Accumulator {
       phantom: PhantomData,
+      phantom_params: PhantomData,
       value: G::exp(&self.0.value, &quotient),
     }))
   }
@@ -351,7 +420,7 @@ impl<G: UnknownOrderGroup, T: Clone + Hash> Witness<G, T> {
   /// Given a witness for many `elems`, computes a sub-witness for each individual element in
   /// O(N log N) time.
   pub fn compute_individual_witnesses(&self, elems: &[T]) -> Vec<(T, Self)> {
-    let hashes = elems.iter().map(hash_to_prime).collect::<Vec<_>>();
+    let hashes = elems.iter().map(Self::hash_to_prime_if_needed).collect::<Vec<_>>();
     elems
       .iter()
       .zip(self.root_factor(&hashes).iter())
@@ -368,12 +437,14 @@ impl<G: UnknownOrderGroup, T: Clone + Hash> Witness<G, T> {
     let g_l = elems[..half_n].iter().fold(self.clone(), |sum, x| {
       Self(Accumulator {
         phantom: PhantomData,
+        phantom_params: PhantomData,
         value: G::exp(&sum.0.value, x),
       })
     });
     let g_r = elems[half_n..].iter().fold(self.clone(), |sum, x| {
       Self(Accumulator {
         phantom: PhantomData,
+        phantom_params: PhantomData,
         value: G::exp(&sum.0.value, x),
       })
     });
@@ -390,8 +461,8 @@ mod tests {
 //  use crate::group::{ClassGroup, Rsa2048};
   use crate::group::{Rsa2048};
 
-  fn new_acc<G: UnknownOrderGroup, T: Hash + Eq>(data: &[T]) -> Accumulator<G, T> {
-    Accumulator::<G, T>::empty().add(data)
+  fn new_acc<G: UnknownOrderGroup, T: Hash + Eq + Into<Integer> + Clone, P: AccumulatorParameters>(data: &[T]) -> Accumulator<G, T, P> {
+    Accumulator::<G, T, P>::empty().add(data)
   }
 
   macro_rules! test_all_groups {
@@ -418,12 +489,12 @@ mod tests {
 
   test_all_groups!(test_add, test_add_rsa2048, test_add_class,);
   fn test_add<G: UnknownOrderGroup>() {
-    let acc = new_acc::<G, &'static str>(&["a", "b"]);
-    let new_elems = ["c", "d"];
+    let acc = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 2.into()]);
+    let new_elems = [3.into(), 4.into()];
     let (acc_new, proof) = acc.add_with_proof(&new_elems);
     let acc_expected = G::exp(
       &G::unknown_order_elem(),
-      &prime_hash_product(&["a", "b", "c", "d"]),
+      &prime_hash_product(&[Integer::from(1), 2.into(), 3.into(), 4.into()]),
     );
     assert!(acc_new.value == acc_expected);
     assert!(acc_new.verify_membership_batch(&new_elems, &proof));
@@ -431,14 +502,14 @@ mod tests {
 
   test_all_groups!(test_delete, test_delete_rsa2048, test_delete_class,);
   fn test_delete<G: UnknownOrderGroup>() {
-    let acc_0 = new_acc::<G, &'static str>(&["a", "b"]);
-    let (acc_1, c_proof) = acc_0.clone().add_with_proof(&["c"]);
+    let acc_0 = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 2.into()]);
+    let (acc_1, c_proof) = acc_0.clone().add_with_proof(&[3.into()]);
     let (acc_2, proof) = acc_1
       .clone()
-      .delete_with_proof(&[("c", c_proof.witness)])
+      .delete_with_proof(&[(3.into(), c_proof.witness)])
       .expect("valid delete expected");
     assert!(acc_2 == acc_0);
-    assert!(acc_1.verify_membership(&"c", &proof));
+    assert!(acc_1.verify_membership(&Integer::from(3), &proof));
   }
 
   test_all_groups!(
@@ -447,7 +518,7 @@ mod tests {
     test_delete_empty_class,
   );
   fn test_delete_empty<G: UnknownOrderGroup>() {
-    let acc = new_acc::<G, &'static str>(&["a", "b"]);
+    let acc = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 2.into()]);
     let (acc_new, proof) = acc
       .clone()
       .delete_with_proof(&[])
@@ -463,10 +534,10 @@ mod tests {
     should_panic(expected = "BadWitness")
   );
   fn test_delete_bad_witness<G: UnknownOrderGroup>() {
-    let acc = Accumulator::<G, &'static str>::empty();
-    let a_witness = Witness(new_acc::<G, &'static str>(&["b", "c"]));
-    let b_witness = Witness(new_acc::<G, &'static str>(&["a", "c"]));
-    acc.delete(&[("a", a_witness), ("b", b_witness)]).unwrap();
+    let acc = Accumulator::<G, Integer, AccumulatorWithHashToPrime>::empty();
+    let a_witness = Witness(new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[2.into(), 3.into()]));
+    let b_witness = Witness(new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 3.into()]));
+    acc.delete(&[(1.into(), a_witness), (2.into(), b_witness)]).unwrap();
   }
 
   test_all_groups!(
@@ -475,12 +546,12 @@ mod tests {
     test_update_membership_witness_class,
   );
   fn test_update_membership_witness<G: UnknownOrderGroup>() {
-    let acc = new_acc::<G, &'static str>(&["a", "b", "c"]);
-    let witness = Witness(new_acc::<G, &'static str>(&["c", "d"]));
+    let acc = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 2.into(), 3.into()]);
+    let witness = Witness(new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[3.into(), 4.into()]));
     let witness_new = acc
-      .update_membership_witness(witness, &["a"], &["b"], &["d"])
+      .update_membership_witness(witness, &[1.into()], &[2.into()], &[4.into()])
       .unwrap();
-    assert!(witness_new.0.add(&["a"]) == acc);
+    assert!(witness_new.0.add(&[1.into()]) == acc);
   }
 
   test_all_groups!(
@@ -490,10 +561,10 @@ mod tests {
     should_panic(expected = "BadWitnessUpdate")
   );
   fn test_update_membership_witness_failure<G: UnknownOrderGroup>() {
-    let acc = new_acc::<G, &'static str>(&["a", "b", "c"]);
-    let witness = Witness(new_acc::<G, &'static str>(&["c", "d"]));
+    let acc = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 2.into(), 3.into()]);
+    let witness = Witness(new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[3.into(), 4.into()]));
     acc
-      .update_membership_witness(witness, &["a"], &["b"], &["a"])
+      .update_membership_witness(witness, &[1.into()], &[2.into()], &[1.into()])
       .unwrap();
   }
 
@@ -503,9 +574,9 @@ mod tests {
     test_prove_nonmembership_class,
   );
   fn test_prove_nonmembership<G: UnknownOrderGroup>() {
-    let acc_set = ["a", "b"];
-    let acc = new_acc::<G, &'static str>(&acc_set);
-    let non_members = ["c", "d"];
+    let acc_set = [1.into(), 2.into()];
+    let acc = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&acc_set);
+    let non_members = [3.into(), 4.into()];
     let proof = acc
       .prove_nonmembership(&acc_set, &non_members)
       .expect("valid proof expected");
@@ -518,11 +589,11 @@ mod tests {
     test_compute_sub_witness_class,
   );
   fn test_compute_sub_witness<G: UnknownOrderGroup>() {
-    let empty_witness = Witness(Accumulator::<G, &'static str>::empty());
+    let empty_witness = Witness(Accumulator::<G, Integer, AccumulatorWithHashToPrime>::empty());
     let sub_witness = empty_witness
-      .compute_subset_witness(&["a", "b"], &["a"])
+      .compute_subset_witness(&[1.into(), 2.into()], &[1.into()])
       .unwrap();
-    let exp_quotient_expected = Witness(new_acc::<G, &'static str>(&["b"]));
+    let exp_quotient_expected = Witness(new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[2.into()]));
     assert!(sub_witness == exp_quotient_expected);
   }
 
@@ -533,18 +604,18 @@ mod tests {
     should_panic(expected = "BadWitness")
   );
   fn test_compute_sub_witness_failure<G: UnknownOrderGroup>() {
-    let empty_witness = Witness(Accumulator::<G, &'static str>::empty());
+    let empty_witness = Witness(Accumulator::<G, Integer, AccumulatorWithHashToPrime>::empty());
     empty_witness
-      .compute_subset_witness(&["a", "b"], &["c"])
+      .compute_subset_witness(&[1.into(), 2.into()], &[3.into()])
       .unwrap();
   }
 
   fn test_compute_individual_witnesses<G: UnknownOrderGroup>() {
-    let acc = new_acc::<G, &'static str>(&["a", "b", "c"]);
-    let witness_multiple = Witness(new_acc::<G, &'static str>(&["a"]));
-    let witnesses = witness_multiple.compute_individual_witnesses(&["b", "c"]);
+    let acc = new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into(), 2.into(), 3.into()]);
+    let witness_multiple = Witness(new_acc::<G, Integer, AccumulatorWithHashToPrime>(&[1.into()]));
+    let witnesses = witness_multiple.compute_individual_witnesses(&[2.into(), 3.into()]);
     for (elem, witness) in witnesses {
-      assert_eq!(acc.value, G::exp(&witness.0.value, &hash_to_prime(elem)));
+      assert_eq!(acc.value, G::exp(&witness.0.value, &hash_to_prime(&elem)));
     }
   }
 

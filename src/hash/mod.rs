@@ -31,7 +31,7 @@ pub trait GeneralHasher: Hasher {
 /// Hash using the general Hasher.
 ///
 /// This function takes in the hash constructor as an argument for convenience.
-pub fn hash<H: GeneralHasher, T: Hash + ?Sized>(new_hasher: &Fn() -> H, t: &T) -> H::Output {
+pub fn hash<H: GeneralHasher, T: Hash + ?Sized>(new_hasher: &dyn Fn() -> H, t: &T) -> H::Output {
   let mut h = new_hasher();
   t.hash(&mut h);
   h.finalize()

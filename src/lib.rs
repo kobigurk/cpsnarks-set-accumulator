@@ -46,21 +46,22 @@
 //! # Usage
 //! ```
 //! // A very basic example.
-//! use accumulator::Accumulator;
+//! use accumulator::{Accumulator, AccumulatorWithHashToPrime};
+//! use rug::Integer;
 //! use accumulator::group::Rsa2048;
 //!
-//! let acc = Accumulator::<Rsa2048, &'static str>::empty();
+//! let acc = Accumulator::<Rsa2048, Integer, AccumulatorWithHashToPrime>::empty();
 //!
-//! // Accumulate "dog" and "cat". The `add_with_proof` method returns the new accumulator state
+//! // Accumulate 5 and 6. The `add_with_proof` method returns the new accumulator state
 //! // and a proof that you accumulated "dog" and "cat".
-//! let (acc, proof) = acc.add_with_proof(&["dog", "cat"]);
+//! let (acc, proof) = acc.add_with_proof(&[5.into(), 6.into()]);
 //!
-//! // A network participant who sees (acc, proof, and ["dog", "cat"]) can verify that the update
+//! // A network participant who sees (acc, proof, and [5, 6]) can verify that the update
 //! // was formed correctly ...
-//! assert!(acc.verify_membership_batch(&["dog", "cat"], &proof));
+//! assert!(acc.verify_membership_batch(&[5.into(), 6.into()], &proof));
 //!
 //! // ... and trying to verify something that has not been accumulated will fail.
-//! assert!(!acc.verify_membership(&"cow", &proof));
+//! assert!(!acc.verify_membership(&Integer::from(7), &proof));
 //! ```
 //!
 //! Typical users of this library will access public-facing routines on `accumulator` and
