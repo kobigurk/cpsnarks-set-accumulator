@@ -89,7 +89,7 @@ impl UnknownOrderGroup for Rsa2048 {
   }
 
   fn order_upper_bound_(_: &Integer) -> Integer {
-      RSA2048_MODULUS.clone()
+      HALF_MODULUS.clone()
   }
 }
 
