@@ -249,6 +249,10 @@ impl UnknownOrderGroup for ClassGroup {
     fn order_upper_bound_(_: &Integer) -> Integer {
         Integer::from(CLASS_GROUP_DISCRIMINANT.clone().abs().sqrt() + 1)
     }
+
+    fn rsa_modulus_(_: &Integer) -> Result<Integer, Integer> {
+        Err(Integer::from(0))
+    }
 }
 
 impl Hash for ClassElem {

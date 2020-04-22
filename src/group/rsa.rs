@@ -99,6 +99,10 @@ impl UnknownOrderGroup for Rsa2048 {
     fn order_upper_bound_(_: &Integer) -> Integer {
         HALF_MODULUS.clone()
     }
+
+    fn rsa_modulus_(_: &Integer) -> Result<Integer, Integer> {
+        Ok(RSA2048_MODULUS.clone())
+    }
 }
 
 #[cfg(test)]

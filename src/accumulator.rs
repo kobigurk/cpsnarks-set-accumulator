@@ -96,8 +96,10 @@ pub struct MembershipProof<G: UnknownOrderGroup, T: Hash + Into<Integer> + Clone
 /// A succinct proof of nonmembership (some element is not in some accumulator).
 pub struct NonmembershipProof<G: UnknownOrderGroup, T> {
   phantom: PhantomData<*const T>,
+  /// d*prod + b*v == 1
   pub d: G::Elem,
   v: G::Elem,
+  /// d*prod + b*v == 1
   pub b: Integer,
   gv_inv: G::Elem,
   poke2_proof: Poke2<G>,

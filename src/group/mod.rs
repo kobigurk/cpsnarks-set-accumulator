@@ -120,6 +120,11 @@ pub trait UnknownOrderGroup: Group {
         Self::order_upper_bound_(Self::rep())
     }
 
+    /// Return the RSA modulus if RSA.
+    fn rsa_modulus() -> Result<Integer, Integer> {
+        Self::rsa_modulus_(Self::rep())
+    }
+
     /// A group-specific wrapper for `unknown_order_elem`.
     fn unknown_order_elem_(rep: &Self::Rep) -> Self::Elem;
 
@@ -131,6 +136,9 @@ pub trait UnknownOrderGroup: Group {
 
     /// A group-specific wrapper for `order_upper_bound`.
     fn order_upper_bound_(rep: &Self::Rep) -> Integer;
+
+    /// A group-specific wrapper for `rsa_modulus`.
+    fn rsa_modulus_(rep: &Self::Rep) -> Result<Integer, Integer>;
 }
 
 /// Like `From<T>`, but implemented on the `Group` instead of the element type.
