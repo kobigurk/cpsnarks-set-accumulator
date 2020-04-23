@@ -1,4 +1,7 @@
 # accumulator
+
+Modified version of [accumulator](https://github.com/cambrian/accumulator) that allows accumulating without hash-to-prime and exposes additional info needed for the protocols in [CPSNARKs-Set](https://github.com/kobigurk/cpsnarks-set).
+
 Cryptographic accumulators in Rust, implemented over a generic group interface. Batteries (RSA and
 class group implementations) included!
 
