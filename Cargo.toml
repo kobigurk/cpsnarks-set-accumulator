@@ -19,7 +19,7 @@ repository = "https://github.com/cambrian/accumulator"
 arrayref = "0.3.5"
 blake2-rfc = "0.2.18"
 curve25519-dalek = "1.1.3"
-gmp-mpfr-sys = "1.1.12"
+gmp-mpfr-sys = "1.2.2"
 lazy_static = "1.3.0"
 rug = "1.7.0"
 
